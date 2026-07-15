@@ -1,0 +1,50 @@
+name: Deploy to Cloud Run
+
+# Runs automatically on every push to main.
+# Mirrors the exact `gcloud run deploy` command used for the manual deploy,
+# just triggered by GitHub instead of run by hand from a terminal.
+on:
+  push:
+    branches: [main]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+  SERVICE: wardrobe-planner
+  IMAGE_BASE_URL: https://storage.googleapis.com/wardrobe-planner-images-active
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # This project has no automated test suite yet, so this is a lightweight
+      # sanity check, not real test coverage: it fails fast if a bad import or
+      # a typo in agent.py / prompts.py / tools.py would crash the app on boot,
+      # instead of finding out only after deploying to Cloud Run.
+      - name: Smoke test — verify the agent package imports cleanly
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -c "from wardrobe_agent import root_agent; print('root_agent loaded OK:', root_agent.name)"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --source . \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --allow-unauthenticated \
+            --memory=1Gi \
+            --timeout=120 \
+            --set-env-vars="GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=$REGION,IMAGE_BASE_URL=$IMAGE_BASE_URL"
